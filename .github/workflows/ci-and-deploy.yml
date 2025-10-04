@@ -1,0 +1,88 @@
+# .github/workflows/ci-and-deploy.yml
+name: Test & Deploy Quasar SPA
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+permissions:
+  contents: write   # needed by peaceiris/actions-gh-pages to push to gh-pages
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps
+
+      # Build the SPA once, and run tests against the production build.
+      - name: Build Quasar SPA
+        run: npx quasar build
+
+      # Serve the built app on port 9000 while running tests.
+      # (Your tests already hit http://localhost:9000/#/)
+      - name: Run Playwright tests (serve dist/spa)
+        run: |
+          npx -y http-server dist/spa -p 9000 --silent &
+          SERVER_PID=$!
+          # small wait to ensure server is up
+          npx wait-on http://localhost:9000
+          npx playwright test
+          kill $SERVER_PID
+
+      - name: Upload Playwright HTML report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
+
+      # Keep the production build for the deploy job
+      - name: Upload built SPA
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-spa
+          path: dist/spa
+          retention-days: 1
+
+  deploy:
+    # Only run if tests succeeded AND the event is a push on master/main (not PR)
+    needs: test
+    if: >
+      needs.test.result == 'success' &&
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download built SPA
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-spa
+          path: dist/spa
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: dist/spa
+          # optional: keep commit history on gh-pages
+          # keep_files: true
