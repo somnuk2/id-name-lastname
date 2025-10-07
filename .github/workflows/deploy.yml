@@ -54,15 +54,6 @@ jobs:
           path: playwright-report/
           retention-days: 30
 
-      # Keep the production build for the deploy job
-      - name: Upload built SPA
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-spa
-          path: dist/spa
-          retention-days: 1
-
   deploy:
     # Only run if tests succeeded AND the event is a push on master/main (not PR)
     needs: test
